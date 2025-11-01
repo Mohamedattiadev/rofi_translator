@@ -9,11 +9,16 @@ os.makedirs(TMP_DIR, exist_ok=True)
 API_KEY = os.getenv("GEMINI_API_KEY", "")
 NOTIFY_TIMEOUT = 120000  # 2 min
 
+
+# Piper voice paths (NEW)
+PIPER_CMD = os.path.expanduser("~/.local/bin/piper")
+PIPER_VOICE_DE = os.path.expanduser("~/.config/piper-voices/de_DE-thorsten-high.onnx")
+
 # Colors (doom-one)
-COLOR_WORD = "#61afef"       # blue
-COLOR_TYPE = "#abb2bf"       # gray
-COLOR_TRANS = "#98c379"      # green
-COLOR_EXAMPLES = "#87CEEB"   # light blue
+COLOR_WORD = "#61afef"      # blue
+COLOR_TYPE = "#abb2bf"      # gray
+COLOR_TRANS = "#98c379"     # green
+COLOR_EXAMPLES = "#87CEEB"  # light blue
 
 # ---------------- Helpers ----------------
 def run(cmd):
@@ -44,10 +49,12 @@ def call_gemini(prompt):
         return ""
 
 def play_tts(text, lang):
-    if lang.startswith("en"):
-        run(f"gtts-cli -l en '{text}' -o {TMP_DIR}/tts.mp3 && mpv --really-quiet {TMP_DIR}/tts.mp3 &")
-    elif lang.startswith("de"):
-        run(f"espeak-ng -v de '{text}' &")
+    if lang.startswith("de"):
+        # Use Piper for German, play twice
+        run(f"echo '{text}' | {PIPER_CMD} --model {PIPER_VOICE_DE} -f {TMP_DIR}/tts_de.wav && mpv --really-quiet {TMP_DIR}/tts_de.wav && mpv --really-quiet {TMP_DIR}/tts_de.wav &")
+    else:
+        # Use gtts-cli for English (for all other targets), play twice
+        run(f"gtts-cli -l en '{text}' -o {TMP_DIR}/tts.mp3 && mpv --really-quiet {TMP_DIR}/tts.mp3 && mpv --really-quiet {TMP_DIR}/tts.mp3 &")
 
 def extract_word_and_pos(cell):
     pos = ""
@@ -75,7 +82,11 @@ if not target_lang:
 
 # ---------------- Start Gemini in background ----------------
 def prepare_gemini():
+
     translation = run(f"trans -b :{target_lang} '{word}'")
+
+
+
     ipa_src = run(f"espeak-ng -v {src_lang} --ipa -q '{word}'").strip()
     ipa_tgt = run(f"espeak-ng -v {target_lang} --ipa -q '{translation}'").strip()
 
@@ -113,8 +124,8 @@ def prepare_gemini():
     )
 
     notify(f"🌐 Examples ({target_lang})", f"<span font='11'>{body}</span>", timeout=NOTIFY_TIMEOUT)
-    if target_lang in ["en","de"]:
-        play_tts(translation, target_lang)
+    # Always play TTS: 'de' for German, 'en' for all other targets
+    play_tts(translation, target_lang)
 
 threading.Thread(target=prepare_gemini, daemon=True).start()
 
@@ -134,7 +145,12 @@ try:
             w2,p2 = extract_word_and_pos(to)
             if not w1 or not w2: continue
             pos = p2 or p1
-            lines.append(f"<b>{w1}</b> ({pos}) → <span color='{COLOR_TRANS}'>{w2}</span>")
+            lines.append(
+                f"<span foreground='{COLOR_WORD}'><b>{w1}</b></span> "
+                f"<span foreground='{COLOR_TYPE}'><b>({pos}) </b></span> "
+                f"→ <span foreground='{COLOR_TRANS}'>{w2}</span>"
+            )
+
     if not lines:
         raise Exception("no wr results")
     out = "\n".join(lines)
@@ -146,4 +162,3 @@ try:
 except Exception:
     trans = run(f"trans -b :{target_lang} '{word}'")
     run(f"printf %s '{trans}' | xclip -selection clipboard")
-
